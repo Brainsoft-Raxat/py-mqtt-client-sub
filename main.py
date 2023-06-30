@@ -25,7 +25,7 @@ def create_csv_file():
         # Create the CSV file and write the header row
         with open(csv_file_path, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(["created_at", "lux_value", "voltage", "batteryValue"])
+            writer.writerow(["created_at", "lux", "current", "power"])
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
@@ -46,7 +46,7 @@ def on_message(client, userdata, msg):
         time_string_utc = current_time_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
         data = json.loads(msg.payload.decode('utf-8'))
 
-        writer.writerow([time_string_utc, data['lux'], data['voltage'], data['batteryValue']])
+        writer.writerow([time_string_utc, data['lux'], data['current'], data['power']])
 
 
 def mqtt_subscriber():
