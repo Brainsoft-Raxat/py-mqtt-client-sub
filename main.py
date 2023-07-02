@@ -85,6 +85,15 @@ async def add_data(data: dict):
 
     return {"message": "Data added successfully"}
 
+@app.post("/truncate")
+async def truncate_table():
+    with psycopg2.connect(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute("TRUNCATE TABLE mqtt_data")
+            conn.commit()
+
+    return {"message": "mqtt_data table truncated successfully"}
+
 if __name__ == "__main__":
     import uvicorn
 
