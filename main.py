@@ -3,6 +3,7 @@ import csv
 import datetime
 import psycopg2
 from pytz import timezone
+import io
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
@@ -10,6 +11,7 @@ from fastapi.responses import Response
 app = FastAPI()
 
 db_url = os.getenv("DATABASE_URL")
+# db_url = "postgresql://postgres:password@localhost:5432/postgres"
 if db_url is None:
     raise ValueError("DATABASE_URL environment variable is not set.")
 
@@ -39,7 +41,7 @@ async def startup_event():
 async def get_csv_file():
     with psycopg2.connect(db_url) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM mqtt_data")
+            cur.execute("SELECT created_at, lux, current, power FROM mqtt_data")
             rows = cur.fetchall()
 
     # Create a CSV file in memory
@@ -49,11 +51,12 @@ async def get_csv_file():
         csv_data.append(list(row))
 
     # Create a response with the CSV file
-    response = Response(content_type="text/csv")
-    response.headers["Content-Disposition"] = 'attachment; filename="mqtt_data.csv"'
-
-    writer = csv.writer(response)
+    csv_buffer = io.StringIO()
+    writer = csv.writer(csv_buffer)
     writer.writerows(csv_data)
+
+    response = Response(content=csv_buffer.getvalue(), media_type="text/csv")
+    response.headers["Content-Disposition"] = 'attachment; filename="mqtt_data.csv"'
 
     return response
 
