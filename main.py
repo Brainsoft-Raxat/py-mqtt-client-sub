@@ -1,32 +1,61 @@
-import csv
 import os
+import csv
 import datetime
+import psycopg2
+from pytz import timezone
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from pytz import timezone
-import uvicorn
+from fastapi.responses import Response
 
 app = FastAPI()
 
-csv_file_path = "data.csv"
+db_url = os.getenv("DATABASE_URL")
+if db_url is None:
+    raise ValueError("DATABASE_URL environment variable is not set.")
+
 timezone_kazakhstan = timezone('Asia/Almaty')
 
-def create_csv_file():
-    # Check if the CSV file exists
-    if not os.path.isfile(csv_file_path):
-        # Create the CSV file and write the header row
-        with open(csv_file_path, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(["created_at", "lux", "current", "power"])
+def create_table():
+    with psycopg2.connect(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mqtt_data (
+                    id SERIAL PRIMARY KEY,
+                    created_at TIMESTAMP,
+                    lux FLOAT,
+                    current FLOAT,
+                    power FLOAT
+                )
+                """
+            )
+            conn.commit()
 
 @app.on_event("startup")
 async def startup_event():
-    create_csv_file()
+    create_table()
 
 @app.get("/csv")
 async def get_csv_file():
-    return FileResponse(csv_file_path)
+    with psycopg2.connect(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM mqtt_data")
+            rows = cur.fetchall()
+
+    # Create a CSV file in memory
+    csv_data = []
+    csv_data.append(["created_at", "lux", "current", "power"])
+    for row in rows:
+        csv_data.append(list(row))
+
+    # Create a response with the CSV file
+    response = Response(content_type="text/csv")
+    response.headers["Content-Disposition"] = 'attachment; filename="mqtt_data.csv"'
+
+    writer = csv.writer(response)
+    writer.writerows(csv_data)
+
+    return response
 
 @app.post("/data")
 async def add_data(data: dict):
@@ -40,15 +69,20 @@ async def add_data(data: dict):
     # Get the current time in Kazakhstan's timezone
     current_time = datetime.datetime.now(timezone_kazakhstan)
 
-    # Format the timestamp as a string
-    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S")
-
-    # Append the data to the CSV file
-    with open(csv_file_path, "a", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow([timestamp, lux, current, power])
+    with psycopg2.connect(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO mqtt_data (created_at, lux, current, power)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (current_time, lux, current, power)
+            )
+            conn.commit()
 
     return {"message": "Data added successfully"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
