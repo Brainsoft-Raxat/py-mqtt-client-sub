@@ -4,6 +4,7 @@ import datetime
 import psycopg2
 from pytz import timezone
 import io
+from typing import Dict
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
@@ -56,7 +57,7 @@ async def get_csv_file():
     writer.writerows(csv_data)
 
     response = Response(content=csv_buffer.getvalue(), media_type="text/csv")
-    response.headers["Content-Disposition"] = 'attachment; filename="mqtt_data.csv"'
+    response.headers["Content-Disposition"] = 'attachment; filename="data.csv"'
 
     return response
 
@@ -70,7 +71,9 @@ async def add_data(data: dict):
         raise HTTPException(status_code=400, detail="Invalid data format")
 
     # Get the current time in Kazakhstan's timezone
-    current_time = datetime.datetime.now(timezone_kazakhstan)
+    current_time = datetime.datetime.utcnow()
+    gmt_offset = datetime.timedelta(hours=6)
+    current_time += gmt_offset
 
     with psycopg2.connect(db_url) as conn:
         with conn.cursor() as cur:
@@ -93,6 +96,25 @@ async def truncate_table():
             conn.commit()
 
     return {"message": "mqtt_data table truncated successfully"}
+
+def execute_query(query: str):
+    global db_url
+    with psycopg2.connect(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query)
+            conn.commit()
+
+@app.post("/execute-sql")
+async def execute_sql_query(query_data: Dict[str, str]):
+    query = query_data.get("query")
+    if not query:
+        raise HTTPException(status_code=400, detail="Query parameter is required")
+
+    # Perform additional security checks or query validation if needed
+
+    execute_query(query)
+
+    return {"message": "Query executed successfully"}
 
 if __name__ == "__main__":
     import uvicorn
