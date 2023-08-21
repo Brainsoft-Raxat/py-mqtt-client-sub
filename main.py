@@ -42,7 +42,7 @@ async def startup_event():
 async def get_csv_file():
     with psycopg2.connect(db_url) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT created_at, lux, current, power FROM mqtt_data")
+            cur.execute("SELECT created_at, lux, current, power FROM mqtt_data ORDER BY created_at ASC")
             rows = cur.fetchall()
 
     # Create a CSV file in memory
@@ -104,17 +104,17 @@ def execute_query(query: str):
             cur.execute(query)
             conn.commit()
 
-@app.post("/execute-sql")
-async def execute_sql_query(query_data: Dict[str, str]):
-    query = query_data.get("query")
-    if not query:
-        raise HTTPException(status_code=400, detail="Query parameter is required")
+# @app.post("/execute-sql")
+# async def execute_sql_query(query_data: Dict[str, str]):
+#     query = query_data.get("query")
+#     if not query:
+#         raise HTTPException(status_code=400, detail="Query parameter is required")
 
-    # Perform additional security checks or query validation if needed
+#     # Perform additional security checks or query validation if needed
 
-    execute_query(query)
+#     execute_query(query)
 
-    return {"message": "Query executed successfully"}
+#     return {"message": "Query executed successfully"}
 
 if __name__ == "__main__":
     import uvicorn
