@@ -1,22 +1,16 @@
 import os
-import csv
-import datetime
 import psycopg2
-from pytz import timezone
-import io
-from typing import Dict
-
+from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from typing import Dict
+import io
+import csv
 
 app = FastAPI()
 
 db_url = os.getenv("DATABASE_URL")
-# db_url = "postgresql://postgres:password@localhost:5432/postgres"
 if db_url is None:
     raise ValueError("DATABASE_URL environment variable is not set.")
-
-timezone_kazakhstan = timezone('Asia/Almaty')
 
 def create_table():
     with psycopg2.connect(db_url) as conn:
@@ -25,10 +19,13 @@ def create_table():
                 """
                 CREATE TABLE IF NOT EXISTS mqtt_data (
                     id SERIAL PRIMARY KEY,
-                    created_at TIMESTAMP,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
                     lux FLOAT,
-                    current FLOAT,
-                    power FLOAT
+                    shuntvoltage FLOAT,
+                    busvoltage FLOAT,
+                    current_mA FLOAT,
+                    loadvoltage FLOAT,
+                    power_mW FLOAT
                 )
                 """
             )
@@ -38,16 +35,51 @@ def create_table():
 async def startup_event():
     create_table()
 
+class SensorData(BaseModel):
+    lux: float
+    shuntvoltage: float
+    busvoltage: float
+    current_mA: float
+    loadvoltage: float
+    power_mW: float
+
+@app.post("/data")
+async def add_data(data: SensorData):
+    try:
+        lux = data.lux
+        shuntvoltage = data.shuntvoltage
+        busvoltage = data.busvoltage
+        current_mA = data.current_mA
+        loadvoltage = data.loadvoltage
+        power_mW = data.power_mW
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid data format")
+
+    with psycopg2.connect(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO mqtt_data (lux, shuntvoltage, busvoltage, current_mA, loadvoltage, power_mW)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (lux, shuntvoltage, busvoltage, current_mA, loadvoltage, power_mW)
+            )
+            conn.commit()
+
+    return {"message": "Data received and processed successfully"}
+
+from fastapi.responses import Response
+
 @app.get("/csv")
 async def get_csv_file():
     with psycopg2.connect(db_url) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT created_at, lux, current, power FROM mqtt_data ORDER BY created_at ASC")
+            cur.execute("SELECT created_at, lux, shuntvoltage, busvoltage, loadvoltage, current_mA, power_mW FROM mqtt_data ORDER BY created_at ASC")
             rows = cur.fetchall()
 
     # Create a CSV file in memory
     csv_data = []
-    csv_data.append(["created_at", "lux", "current", "power"])
+    csv_data.append(["created_at", "lux", "shuntvoltage", "busvoltage", "loadvoltage", "current_mA", "power_mW"])  # Update column names
     for row in rows:
         csv_data.append(list(row))
 
@@ -59,34 +91,8 @@ async def get_csv_file():
     response = Response(content=csv_buffer.getvalue(), media_type="text/csv")
     response.headers["Content-Disposition"] = 'attachment; filename="data.csv"'
 
-    return response
+    return response  # Corrected from 'respons' to 'response'
 
-@app.post("/data")
-async def add_data(data: dict):
-    try:
-        lux = float(data["lux"])
-        current = float(data["current"])
-        power = float(data["power"])
-    except (KeyError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid data format")
-
-    # Get the current time in Kazakhstan's timezone
-    current_time = datetime.datetime.utcnow()
-    gmt_offset = datetime.timedelta(hours=6)
-    current_time += gmt_offset
-
-    with psycopg2.connect(db_url) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO mqtt_data (created_at, lux, current, power)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (current_time, lux, current, power)
-            )
-            conn.commit()
-
-    return {"message": "Data added successfully"}
 
 @app.post("/truncate")
 async def truncate_table():
@@ -104,17 +110,17 @@ def execute_query(query: str):
             cur.execute(query)
             conn.commit()
 
-# @app.post("/execute-sql")
-# async def execute_sql_query(query_data: Dict[str, str]):
-#     query = query_data.get("query")
-#     if not query:
-#         raise HTTPException(status_code=400, detail="Query parameter is required")
+@app.post("/execute-sql")
+async def execute_sql_query(query_data: Dict[str, str]):
+    query = query_data.get("query")
+    if not query:
+        raise HTTPException(status_code=400, detail="Query parameter is required")
 
-#     # Perform additional security checks or query validation if needed
+    # Perform additional security checks or query validation if needed
 
-#     execute_query(query)
+    execute_query(query)
 
-#     return {"message": "Query executed successfully"}
+    return {"message": "Query executed successfully"}
 
 if __name__ == "__main__":
     import uvicorn
